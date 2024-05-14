@@ -171,9 +171,9 @@ for name, n in zip(etypes.index,etypes):
     print(f'{name}:\t{n}')
     
 good_coef = int(sum(final_stat.good_coef.fillna(0)))
-print(f"\nNMD events without junction and site problems: {good_coef}\n")
+print(f"\nNMD events without junction and coef problems: {good_coef}\n")
 if good_coef<good_j:
-    print('Site problems:')
+    print('Coef problems:')
     coef_problems = final_stat[(final_stat.good_coef==0)].coef_tags.apply(lambda x: tuple([i for i in x if i!='shorter_blob'])).value_counts()
     for name, n in zip(coef_problems.index,coef_problems):
         print(f'{name}:\t{n}') 
