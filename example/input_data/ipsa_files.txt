@@ -1,0 +1,2 @@
+/gss/home/l.zavileisky.ext/nmdj_paper/NMDj/scripts/../example/ipsa_output/J6/Aligned.sortedByCoord.out.J6.gz
+/gss/home/l.zavileisky.ext/nmdj_paper/NMDj/scripts/../example/ipsa_output/S6/Aligned.sortedByCoord.out.S6.gz

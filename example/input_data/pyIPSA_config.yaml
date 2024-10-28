@@ -1,0 +1,78 @@
+# Parameters for each stage
+# STAGE 0: preparation of data
+
+# Folders with input and output data. Variables will be replaced with paths via envsubst
+#input_dir: ${\ipsainp\}
+#output_dir: ${\ipsaout\}
+input_dir: ${ipsainp}
+output_dir: ${ipsaout}
+pooled: False
+
+# STAGE 1: extract junctions/sites
+
+# Options for read counting and filtering
+# If a read is multimapped, only the primary alignment will be considered
+primary: False
+# If a read is multimapped, all its alignments will be ignored
+unique: False
+# Number of threads to read individual alignment files (BAM)
+threads: 1
+
+# Read pair orientation that corresponds to forward strand in strand-specific protocols
+# strand_mode: F2R1
+# F2 means that read2 is on the forward strand, R1 - read1 on the reverse strand
+# Possible values: F2R1, F1R2
+# In Illumina strand-specific protocol it is usually F2R1
+
+# STAGE 2: aggregate junctions/sites
+
+# Minimal offset for aggregation
+min_offset: 4
+
+# Minimal overhang for polyA aggregation
+min_overhang: 8
+
+# Minimal intron length
+min_intron_length: 40
+
+# Maximal intron length
+max_intron_length: 100000
+
+# STAGE 4: filter junctions/sites
+# Entropy threshold
+entropy: 1.5
+
+# Total count threshold
+total_count: 1
+
+# Use only GT/AG splice sites
+gtag: False
+
+# If you use your own genome files, provide their names here
+genome_filenames:
+  hg19: hg19.fa
+  hg38: hg38.fa
+  mm10: mm10.fa
+  mm9: mm9.fa
+  dm6: dm6.fa
+  dm3: dm3.fa
+  
+# URLs to download genome files (FASTA)
+genome_urls:
+  hg19: ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_35/GRCh37_mapping/GRCh37.primary_assembly.genome.fa.gz
+  hg38: ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_35/GRCh38.primary_assembly.genome.fa.gz
+  mm10: ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M25/GRCm38.primary_assembly.genome.fa.gz
+  mm9: ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M1/NCBIM37.genome.fa.gz
+  dm6: http://hgdownload.soe.ucsc.edu/goldenPath/dm6/bigZips/dm6.fa.gz
+  dm3: http://hgdownload.soe.ucsc.edu/goldenPath/dm3/bigZips/dm3.fa.gz
+
+# URLs to download genome annotations
+annotation_urls:
+  hg19: ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_35/GRCh37_mapping/gencode.v35lift37.annotation.gtf.gz
+  hg38: ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_35/gencode.v35.primary_assembly.annotation.gtf.gz
+  mm10: ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M25/gencode.vM25.primary_assembly.annotation.gtf.gz
+  mm9: ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M1/gencode.vM1.annotation.gtf.gz
+  dm6: http://hgdownload.soe.ucsc.edu/goldenPath/dm6/bigZips/genes/dm6.ensGene.gtf.gz
+  dm3: http://hgdownload.soe.ucsc.edu/goldenPath/dm3/bigZips/genes/dm3.ensGene.gtf.gz
+
+
