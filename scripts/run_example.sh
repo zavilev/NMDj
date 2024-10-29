@@ -27,6 +27,7 @@ outgenome='../example/rsem_ref'
 ref="${outgenome}/chr1"
 
 gzip -d "${gtf}.gz"
+gzip -d "${stringtie_gtf}.gz"
 gzip -d "${genome}.gz"
 
 mkdir -p ${outgenome}
