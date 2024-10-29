@@ -356,7 +356,8 @@ if args.ipsa_files is not None:
     sdict = dict()
     jdict = dict()
     for file in files:
-        sample_name = re.split('/|\.',file)[-3]
+#        sample_name = re.split('/|\.',file)[-3]
+        sample_name = file.split("/")[-1][:-6] #ipsa outputs files sample_name.J6.gz and sample_name.S6.gz
         if 'S6' in file:
             sdict[file] = sample_name
         elif 'J6' in file:
