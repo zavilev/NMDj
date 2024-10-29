@@ -16,9 +16,10 @@ NMDj directory contains `./scripts` and `./example` directories. The `./scripts`
 
 ### Dependencies
 
-To run NMDj, you need the following python packages installed:
+To run NMDj, you need the following python dependencies:
 
-- pandas (tested with 1.52)
+- python (tested with 3.8)
+- pandas (tested with 1.5.2)
 - gtfparse (tested with 2.5.0)
 - numpy (tested with 1.24.4)
 - biopython (tested with 1.81)
@@ -104,7 +105,12 @@ Example script `./scripts/run_example.sh`:
 5. compares ground truth PSI values with those obtained by NMDj;
 6. runs NMDj based on GTF containing novel transcripts obtained by StringTie, to demonstrate ability to annotate ORFs
 
-Modify config section in `./scripts/run_example.sh` and run it. The following content will be created in `./example`:
+Modify config section in `./scripts/run_example.sh`, then
+
+    cd ./scripts
+    ./run_example.sh
+
+The following content will be created in `./example`:
 
 - `rsem_ref/`. Contains results of rsem-prepare-reference
 - `simulation/`. Contains results of rsem-simulate-reads
