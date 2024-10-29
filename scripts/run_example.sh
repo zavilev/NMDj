@@ -26,9 +26,9 @@ genome='../example/input_data/chr1.fa'
 outgenome='../example/rsem_ref'
 ref="${outgenome}/chr1"
 
-gzip -d "${gtf}.gz"
-gzip -d "${stringtie_gtf}.gz"
-gzip -d "${genome}.gz"
+zcat "${gtf}.gz" > "${gtf}"
+zcat "${stringtie_gtf}.gz" > "${stringtie_gtf}"
+zcat "${genome}.gz" > "${genome}"
 
 mkdir -p ${outgenome}
 rsem-prepare-reference -p ${threads} --star --star-path ${star_path} --gtf ${gtf} ${genome} ${ref}
