@@ -1,3 +1,6 @@
+# NMDj
+[https://pubmed.ncbi.nlm.nih.gov/40771844/](https://pubmed.ncbi.nlm.nih.gov/40771844/)
+
 ## Description
 
 NMDj is a tool for searching, classification and quantification of local splicing events, which lead to formation of transcripts targeted by nonsense-mediated decay (NMD) system. NMDj takes transcript annotation (in GTF format) and outputs local splicing events in the form of characteristic junctions (CJs). CJs are the set of alternative junctions from the same transcript region, derived either from coding or NMD transcripts. A switch from coding CJs to NMD CJs induces frameshift or creates introns more than 50nt downstream of a stop-codon, which triggers NMD.
