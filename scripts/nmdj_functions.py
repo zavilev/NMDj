@@ -15,6 +15,7 @@ import concurrent.futures
 import io
 import subprocess
 import csv
+from pandasql import sqldf
 
 #1. read and write gtf
 
@@ -23,7 +24,8 @@ def desc2dict(desc):
     dic = defaultdict(list)
     for item in desc:
         item = item.split(" ")
-        dic[item[0]].append(item[1].strip('";'))
+        if len(item)==2:
+            dic[item[0]].append(item[1].strip('";'))
     return {key:",".join(value) for key,value in dic.items()}
 
 def load_annotation(gtfile):
@@ -38,7 +40,8 @@ def format_desc(row,*attrs):
     desc = [f'{attr} "{row[attr]}"' for attr in attrs if not pd.isnull(row[attr])]
     return '; '.join(desc)+';'
 
-def write_annotation(df,file):
+def write_annotation(x,file):
+    df = x.copy()
     gtfcols = ['chrn', 'source', 'type', 'start', 'end', 'score', 'strand', 'frame' ,'desc']
     for col in set(gtfcols)-set(df.columns):
         df[col] = '.'
@@ -47,6 +50,28 @@ def write_annotation(df,file):
     return df[gtfcols].to_csv(file,sep='\t',index=False,header=False,quoting=csv.QUOTE_NONE)
     
 #2 Assign novel transcripts to annotated genes and find ORF
+
+def sqljoin(t1,t2):
+    t1 = t1.reset_index(drop=True)
+    t2 = t2.reset_index(drop=True)
+    junction = t1.junction
+    gjunction = t2.gjunction
+    t1['ind'] = t1.index
+    t2['gind'] = t2.index
+    t1 = t1.drop('junction',axis=1)
+    t2 = t2.drop('gjunction',axis=1)
+    print(t1.shape[0],t2.shape[0])
+
+    sql = '''SELECT * FROM t1 JOIN t2 ON (t1.chrn = t2.chrn) AND (t1.strand = t2.strand) AND (MAX(t1.start, t2.gstart) < MIN(t1.end,t2.gend))'''
+    m = sqldf(sql, locals())
+    m['junction'] = m.ind.map(junction)
+    m['gjunction'] = m.gind.map(gjunction)
+    
+    cj = np.vectorize(lambda x,y: len(x&y))
+    m['tr'] = (np.minimum(m.end,m.gend)-np.maximum(m.start,m.gstart))/(m.end-m.start)
+    m['cj'] = cj(m.junction,m.gjunction)
+    m = m[(m.tr>0.5)].sort_values(['cj','tr'],ascending=False).drop_duplicates('transcript_id')
+    return m.set_index('transcript_id').gene_id
 
 def noveltr2gene(novel,annot):
     nexons = novel[novel.type=='exon']
@@ -61,29 +86,28 @@ def noveltr2gene(novel,annot):
     #get junctions of all transcripts
     jstarts = exons.groupby(['tclass',
                              'gene_id',
-                             'transcript_id'],sort=False).end.apply(lambda x:[np.nan]+x.tolist()[:-1])
-    exons = exons.drop('end',1).rename(columns={'start':'end'})
+                             'transcript_id'],sort=False,observed=True).end.apply(lambda x:[np.nan]+x.tolist()[:-1])
+    exons = exons.drop('end',axis=1).rename(columns={'start':'end'})
     exons['start'] = list(flatten(jstarts))
     
     junctions = exons[exons.start.notna()][['tclass','gene_id',
                                              'transcript_id','chrn','start','end','strand']]
     junctions.start = junctions.start.astype('int')
-    junctions['junction'] = junctions[['start','end']].apply(tuple,1)
+    junctions['junction'] = junctions[['start','end']].apply(tuple,axis=1)
     
-    anngenes = junctions[junctions.tclass=='annot'].groupby('gene_id').junction.agg(set).reset_index()
-    anngenes = antrs.groupby(['gene_id',
-                              'chrn','strand']).agg({'start':min,'end':max}).reset_index().merge(anngenes,
-                                                                                                 how='left')
+    anngenes = junctions[junctions.tclass=='annot'].groupby('gene_id',sort=False,observed=True).junction.agg(set).reset_index()
+    anngenes = antrs.groupby(['gene_id','chrn','strand'],
+                             sort=False,observed=True).agg({'start':min,'end':max}).reset_index().merge(anngenes,how='left')
     
     noveltrj = junctions[junctions.tclass=='novel'].groupby('transcript_id').junction.agg(set).reset_index()
-    noveltrs = noveltrs.groupby(['transcript_id',
-                                 'chrn','strand']).agg({'start':min,
-                                                        'end':max}).reset_index().merge(noveltrj,how='left')
+    noveltrs = noveltrs.groupby(['transcript_id','chrn','strand'],
+                                sort=False,observed=True).agg({'start':min,'end':max}).reset_index().merge(noveltrj,how='left')
     
     noveltrs.junction = noveltrs.junction.fillna('').apply(set)
     anngenes.junction = anngenes.junction.fillna('').apply(set)
     anngenes.rename(columns={'start':'gstart','end':'gend','junction':'gjunction'},inplace=True)
 
+    return sqljoin(noveltrs,anngenes).to_dict()
     #merge results in huge table
     m = noveltrs.merge(anngenes,how='inner')
     m['l'] = np.maximum(m.start,m.gstart)
@@ -94,7 +118,7 @@ def noveltr2gene(novel,annot):
     m = m[m.inter>0]
     m['gene'] = m.inter/(m.gend-m.gstart)
     m['tr'] = m.inter/(m.end-m.start)
-    m['commonj'] = m.apply(lambda x: len(x.junction&x.gjunction),1)
+    m['commonj'] = m.apply(lambda x: len(x.junction&x.gjunction),axis=1)
 
     m = m.sort_values(['commonj','tr','gene'],ascending=False).drop_duplicates('transcript_id')
     m = m[(m.tr>0.5)]
@@ -106,21 +130,21 @@ def orfann(novel,startann,genome):
 #firstly get all unique annotated start codon positions
     startann = startann[startann.type=='start_codon']
     #to process start codons split by junctions
-    starts = startann.groupby(['gene_id','transcript_id']).agg({'start':min,'end':max}).reset_index()
+    starts = startann.groupby(['gene_id','transcript_id'],sort=False,observed=True).agg({'start':min,'end':max}).reset_index()
     starts = starts.drop_duplicates(['start','gene_id'])
     starts.rename(columns={'transcript_id':'start_id',
                            'start':'start_start','end':'start_end'},inplace=True)
     
-#remove gene versions
+#remove gene versions --- leads to errors, remove
     tmp = novel.copy()
-    tmp.gene_id = tmp.gene_id.apply(lambda x: x.split('.')[0] if isinstance(x,str) else x)
-    starts.gene_id = starts.gene_id.apply(lambda x: x.split('.')[0] if isinstance(x,str) else x)
+#    tmp.gene_id = tmp.gene_id.apply(lambda x: x.split('.')[0] if isinstance(x,str) else x)
+#    starts.gene_id = starts.gene_id.apply(lambda x: x.split('.')[0] if isinstance(x,str) else x)
 
 #select starts that are in exonic regions of novel transcripts
     intls = tmp[tmp.type=='exon'].merge(starts,how='inner',on='gene_id')
     intls['l'] = (intls.start<=intls.start_end)&(intls.end>=intls.start_end)
     intls['r'] = (intls.start<=intls.start_end)&(intls.end>=intls.start_end)
-    possible = intls.groupby(['transcript_id','start_id'])[['l','r']].agg(any).apply(all,1)
+    possible = intls.groupby(['transcript_id','start_id'],sort=False,observed=True)[['l','r']].agg(any).apply(all,axis=1)
     intls = possible[possible].reset_index().merge(intls).drop([0,'l','r'],axis=1)
 
 #drop 5UTR
@@ -145,10 +169,11 @@ def orfann(novel,startann,genome):
     def get_seq(row,chrs=chrs):
         return chrs[row.chrn].seq[row.start-1:row.end]
     
-    intls['sequence'] = intls.apply(get_seq,1)
+    intls['sequence'] = intls.apply(get_seq,axis=1)
     intls.loc[intls.strand=='-','sequence'] = intls.loc[intls.strand=='-','sequence'].apply(lambda x: x.reverse_complement())
     intls.sequence = intls.sequence.apply(str)
-    cds = intls.groupby(['transcript_id','start_id']).sequence.agg(lambda x: "".join(x)).apply(lambda x: Seq.Seq(x).translate())
+    cds = intls.groupby(['transcript_id','start_id'],
+                        sort=False,observed=True).sequence.agg(lambda x: "".join(x)).apply(lambda x: Seq.Seq(x).translate())
     cds = cds.apply(str).reset_index()
     cds = intls[['transcript_id','strand']].drop_duplicates().merge(cds)
     cds['ntfromstart'] = cds.sequence.apply(lambda x: len(x.split('*')[0]))*3+3
@@ -159,10 +184,10 @@ def orfann(novel,startann,genome):
 #find stop codon positions
     intls[['start','end']] = intls[['start','end']].astype('int')
     intls['length'] = intls['end'] - intls['start'] + 1
-    intls.length = intls.groupby('transcript_id').length.transform(np.cumsum)
+    intls.length = intls.groupby('transcript_id',sort=False,observed=True).length.transform(np.cumsum)
 
     intls['delta'] = intls.length-intls.ntfromstart
-    stops = intls[intls.delta>0].groupby('transcript_id').head(1).reset_index(drop=True).copy()
+    stops = intls[intls.delta>0].groupby('transcript_id',sort=False,observed=True).head(1).reset_index(drop=True).copy()
 
     stops['a'] = stops.end-stops.delta
     stops['b'] = stops.start+stops.delta
@@ -192,7 +217,8 @@ def orfann(novel,startann,genome):
 #3 convert annotation to more convenient format
 
 def process_annotation(an):  
-    all_transcripts = an[an.type.isin(['transcript','exon','start_codon','stop_codon'])].groupby('type').transcript_id.agg(set)
+    all_transcripts = an[an.type.isin(['transcript','exon',
+                                       'start_codon','stop_codon'])].groupby('type',observed=True,sort=False).transcript_id.agg(set)
     u1 = set.intersection(*all_transcripts)
     an = an[an.transcript_id.isin(u1)]
     
@@ -204,12 +230,12 @@ def process_annotation(an):
     
     #get tables of exons, starts and stops
     trs = an[an.type=='exon'].copy()
-    if 'exon_number' not in an.columns:
-        trs['exon_number'] = 1
-        exf = trs[(an.strand=='+')].sort_values(['transcript_id','start','end'])
-        exr = trs[(an.strand=='-')].sort_values(['transcript_id','start','end'],ascending=False)
-        trs = pd.concat([exf,exr])
-        trs.exon_number = trs.groupby('transcript_id').exon_number.apply(np.cumsum)
+    #if 'exon_number' not in an.columns:
+    trs['exon_number'] = 1
+    exf = trs[(trs.strand=='+')].sort_values(['transcript_id','start','end'])
+    exr = trs[(trs.strand=='-')].sort_values(['transcript_id','start','end'],ascending=False)
+    trs = pd.concat([exf,exr])
+    trs.exon_number = trs.groupby('transcript_id',sort=False,observed=True).exon_number.transform(np.cumsum)
 
 #    trs = trs[['chrn', 'start', 'end', 'strand', 
 #                               'gene_id','transcript_id', 'exon_number',
@@ -218,7 +244,7 @@ def process_annotation(an):
     borders = an[an.type.isin(['start_codon','stop_codon'])][['start', 'end', 'type',
                                                                   'strand', 'gene_id', 'transcript_id']].copy()
     borders = borders.groupby(['type','strand',
-                               'gene_id','transcript_id']).agg({"start":[min,max],"end":[min,max]}).reset_index()
+                               'gene_id','transcript_id'],sort=False,observed=True).agg({"start":[min,max],"end":[min,max]}).reset_index()
     borders.columns = [i[0] if i[1]=='' else "_".join(i) for i in borders.columns]
     
     starts = borders[borders.type=='start_codon'].copy()
@@ -256,8 +282,8 @@ def find_nmd(trs,threshold=51):
 
     nmd['length'] = nmd.end-nmd.start+1
     nmd = nmd.sort_values(['transcript_id','exon_number']).reset_index(drop=True)
-    nmd['cumlen'] = nmd.groupby('transcript_id').length.transform(np.cumsum)
-    lastexons = nmd.groupby('transcript_id').tail(1).index
+    nmd['cumlen'] = nmd.groupby('transcript_id',sort=False,observed=True).length.transform(np.cumsum)
+    lastexons = nmd.groupby('transcript_id',sort=False,observed=True).tail(1).index
     custom_nmd = nmd.loc[(~nmd.index.isin(lastexons))&(nmd.cumlen>threshold)].transcript_id.unique()
     trs['transcript_biotype'] = trs.transcript_id.isin(custom_nmd).map({True:'nonsense_mediated_decay',
                                                                         False: 'protein_coding'})
@@ -282,12 +308,12 @@ def calculate_frame(trs, filtering=True):
     cds['length'] = cds.end-cds.start+1
     cds = cds.sort_values(['transcript_id','exon_number']).reset_index(drop=True)
 
-    cds['cumlen3'] = cds.groupby('transcript_id').length.transform(np.cumsum)
+    cds['cumlen3'] = cds.groupby('transcript_id',sort=False,observed=True).length.transform(np.cumsum)
     cds['cumlen5'] = cds['cumlen3'] - cds.length
     cds[3] = cds['cumlen3']%3
     cds[5] = cds['cumlen5']%3
 
-    aa = cds.groupby('transcript_id').tail(1)
+    aa = cds.groupby('transcript_id',sort=False,observed=True).tail(1)
     cds = cds[cds.transcript_id.isin(aa[aa[3]==0].transcript_id)]
 
     cds = cds.melt(id_vars=[i for i in cds.columns if i not in [3,5]],
@@ -323,7 +349,7 @@ def calculate_frame(trs, filtering=True):
     allsites = allsites.sort_values(['gene_id','transcript_id','exon_number','site'],ascending=[True]*3+[False])
     allsites['junction_number'] = allsites['exon_number']
     allsites.loc[(allsites.site==5),'junction_number'] = allsites.loc[(allsites.site==5),'junction_number']-1
-    last3 = allsites.groupby('transcript_id').tail(1).index
+    last3 = allsites.groupby('transcript_id',sort=False,observed=True).tail(1).index
     allsites.loc[last3,'junction_number'] = 0
     return allsites
 
@@ -374,7 +400,7 @@ def select_interval_utr(ntr,ctrs,st,tags):
     tags.append('3utr')
     #interval is (stop, end of the shortest 3UTR of coding transcripts with the same stop)
     ptc = ntr.stop_coord.iloc[0]
-    ends = ctrs[ctrs.stop_coord==ptc].groupby('transcript_id').tail(1).coord.tolist()
+    ends = ctrs[ctrs.stop_coord==ptc].groupby('transcript_id',sort=False,observed=True).tail(1).coord.tolist()
     if st:
         return ptc,min(ends)
     else:
@@ -416,7 +442,8 @@ def get_junctions(ntr,ctrs,st,tags):
         else: 
             ctjs = ctjs[(ctjs[5]<=left)&(ctjs[3]>=right)]
         #drop duplicated junctions
-        ctjs = ctjs.groupby(['chrn','strand','gene_id','transcript_biotype',3,5]).transcript_id.agg(set).reset_index()
+        ctjs = ctjs.groupby(['chrn','strand','gene_id','transcript_biotype',3,5],
+                            sort=False,observed=True).transcript_id.agg(set).reset_index()
     if len(ntj)!=0:
         if st:
             ntj = ntj[(ntj[5]>=left)&(ntj[3]<=right)]
@@ -469,7 +496,8 @@ def get_ir(ntr,ctrs,res,st,tags): #res is output of get_junctions
     ir['jtype'] = 'ir'
     ir = ir[(ir.exonstart<ir.start)&(ir.exonend>ir.end)][cols] #find exons which contain whole junctions
     #ir = ir.sample(2)[cols]
-    ir = ir.groupby([col for col in cols if col != 'transcript_id']).transcript_id.agg(set).reset_index()
+    ir = ir.groupby([col for col in cols if col != 'transcript_id'],
+                    sort=False,observed=True).transcript_id.agg(set).reset_index()
     ir = ir.drop_duplicates(['start','end'],keep=False)
     if len(ir)!=0:
         tags.append('IR')
@@ -510,10 +538,10 @@ def process_events(allsites,threads=5,start_time=None):
         start_time = time.time()
     with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
         futures = dict()
-        for gene, temp in allsites.groupby('gene_id'):
+        for gene, temp in allsites.groupby('gene_id',sort=False,observed=True):
             ntrs = temp[temp.transcript_biotype=='nonsense_mediated_decay']
             ctrs = temp[temp.transcript_biotype=='protein_coding']
-            for transcript,ntr in ntrs.groupby('transcript_id'):
+            for transcript,ntr in ntrs.groupby('transcript_id',sort=False,observed=True):
                 futures[executor.submit(process_event, ntr,ctrs)] = transcript
         print(f'tasks created, time: {round((time.time()-start_time)/60, 2)} min')
         for future in concurrent.futures.as_completed(futures):
@@ -554,7 +582,7 @@ def get_trids(catalog,an,ref=None):
     if ref is not None:
         condition = catalog.tr.apply(lambda x: len(x&set(ref))>0)
         cat = cat[condition|(cat.transcript_biotype=='nonsense_mediated_decay')]
-    df = cat.groupby(['event_id','nmd_id_list', 'coding_id_list']).agg({'start':min,'end':max}).reset_index()
+    df = cat.groupby(['event_id','nmd_id_list', 'coding_id_list'],sort=False,observed=True).agg({'start':min,'end':max}).reset_index()
     df.rename(columns={'start':'vmin','end':'vmax'},inplace=True)
     df.vmin-=1
     df.vmax+=1
@@ -577,14 +605,15 @@ def get_trids(catalog,an,ref=None):
     ann.loc[ann.start<=ann.vmin,'start'] = ann.loc[ann.start<=ann.vmin,'vmin']
     ann.loc[ann.end>=ann.vmax,'end'] = ann.loc[ann.end>=ann.vmax,'vmax']
 
-    ann['exons'] = ann[['start','end']].apply(tuple,1)
-    trids = ann.groupby(['event_id','strand','transcript_id','transcript_biotype']).exons.agg(list)\
-               .apply(sorted).apply(tuple).reset_index()
-    trids = trids.groupby(['event_id','strand','exons','transcript_biotype']).transcript_id.agg(list).reset_index()
+    ann['exons'] = ann[['start','end']].apply(tuple,axis=1)
+    trids = ann.groupby(['event_id','strand','transcript_id','transcript_biotype'],
+                        sort=False,observed=True).exons.agg(list).apply(sorted).apply(tuple).reset_index()
+    trids = trids.groupby(['event_id','strand','exons','transcript_biotype'],
+                          sort=False,observed=True).transcript_id.agg(list).reset_index()
     trids.transcript_id = trids.transcript_id.apply(sorted).apply(lambda x: ', '.join(x))
     return trids
 
-#buld splice graph and find VIPs
+#build splice graph and find VIPs
 class Node():
     def __init__(self,name,t=None):
         self.name = name
@@ -671,20 +700,20 @@ def _classify(nmd,coding,strand):
     return etype
 
 def classify_event(df):
-    #try:
-    strand = df.strand.iloc[0]
-    types = set()
-    for _,nmdrow in df[df.transcript_biotype=='nonsense_mediated_decay'].iterrows():
-        for _,codingrow in df[df.transcript_biotype=='protein_coding'].iterrows():
-            if nmdrow.exons==codingrow.exons:
-                return 'same_junctions'
-            nmd = list(nmdrow.exons)
-            coding = list(codingrow.exons)
-            etype = _classify(nmd,coding,strand)
-            types|={etype}
-    return '|'.join(sorted(types))
-#    except Exception as e:
-#        return f'error: {e}'
+    try:
+        strand = df.strand.iloc[0]
+        types = set()
+        for _,nmdrow in df[df.transcript_biotype=='nonsense_mediated_decay'].iterrows():
+            for _,codingrow in df[df.transcript_biotype=='protein_coding'].iterrows():
+                if nmdrow.exons==codingrow.exons:
+                    return 'same_junctions'
+                nmd = list(nmdrow.exons)
+                coding = list(codingrow.exons)
+                etype = _classify(nmd,coding,strand)
+                types|={etype}
+        return '|'.join(sorted(types))
+    except Exception as e:
+        return f'error: {e}'
 
 def _convert_etype(x):
     if x=='':
@@ -741,12 +770,10 @@ class Event():
     def __str__(self):
         return f"Transcripts = [{', '.join(self.trids)}], min={self.min}, max={self.max}\nJunctions = {self.junctions},"
 def group_events(df): #df is a set of event-junctions of the same gene 
-    #df['junction'] = df[['start','end']].apply(tuple,1)
     events = dict()
     nmd = df[df.transcript_biotype=='nonsense_mediated_decay']
-    for key,row in nmd.groupby('nmd_transcript_id').agg({'start':min,
-                                                         'end':max,
-                                                         'junction':set}).sort_values(['start','end']).iterrows():
+    for key,row in nmd.groupby('nmd_transcript_id',
+                               sort=False,observed=True).agg({'start':min,'end':max,'junction':set}).sort_values(['start','end']).iterrows():
         k=-1
         for k in events.keys():
             if (events[k].junctions & row.junction):
@@ -853,7 +880,7 @@ def get_sum(df):
     trs = list(set.union(*df.tr.tolist()))
     for tr in trs:
         s = sum(df.tr.apply(lambda x: tr in x).astype('int')*df.coef)
-        if s!=1:
+        if abs(s-1)>10e-4:
             return 1
     return 0
 
@@ -1069,7 +1096,7 @@ def get_psi(catalog,data,event_col = 'event_id',
     data = pd.concat([meta,arr],axis=1)    
     
     data[nmd_col] = (data[nmd_col]==nmd_tag).map({True: 'nmd', False: 'coding'})
-    data = data.groupby([event_col,nmd_col])[arr.columns].agg(sum).reset_index()
+    data = data.groupby([event_col,nmd_col],sort=False,observed=True)[arr.columns].agg(sum).reset_index()
     data = data.melt(id_vars = [event_col,nmd_col], 
                      var_name = 'sample_num', value_name='count').pivot(index=[event_col,'sample_num'], 
                                                                        columns=nmd_col).reset_index().fillna(0)

@@ -21,11 +21,11 @@ NMDj directory contains `./scripts` and `./example` directories. The `./scripts`
 
 To run NMDj, you need the following python dependencies:
 
-- python (tested with 3.9.13)
-- pandas (tested with 1.5.3)
+- python (tested with 3.8)
+- pandas (tested with 1.5.2)
 - gtfparse (tested with 2.5.0)
-- numpy (tested with 1.26.4)
-- biopython (tested with 1.79)
+- numpy (tested with 1.24.4)
+- biopython (tested with 1.81)
 
 To run example script, you additionally need [RSEM](https://github.com/deweylab/RSEM) (tested with 1.3.3), [STAR](https://github.com/alexdobin/STAR) (tested with 2.7.3a) and [pyIPSA](https://github.com/pervouchinelab/pyIPSA)
 
@@ -37,14 +37,9 @@ Add NMDj.py to your PATH. To get usage options run
 
 The output is 
 
-    NMDj.py [-h] -g infile.gtf [-o] [-a annotation.gtf] [-G genome.fa] [-n] [-N] [-r transcripts.txt or attr:value]
-                   [-p path/to/output/] [-q file.txt] [--threads THREADS] [--no_clustering] [--use_nnls]
-    
-    The program takes GTF as input and finds NMD-causing local splicing events in the form of a list of exon-exon
-    junctions that discriminate between an NMD transcript and coding transcripts of the same gene. It optionally
-    calculates PSI values of found NMD-causing local splicing events based on split-read counts (obtained e.g by pyIPSA
-    package)
-    
+    usage: NMDj.py [-h] -g infile.gtf [-o] [-a annotation.gtf] [-G genome.fa] [-n] [-N] [-r transcripts.txt or attr:value] [-p path/to/output/] [-q file.txt]
+                   [--threads THREADS] [--no_clustering]
+
     optional arguments:
       -h, --help            show this help message and exit
       -g infile.gtf, --gtf infile.gtf
@@ -57,16 +52,14 @@ The output is
       -n, --nmd             whether to predict targets of NMD in input.gtf
       -N, --nmdann          whether to predict targets of NMD in annotation.gtf
       -r transcripts.txt or attr:value, --ref transcripts.txt or attr:value
-                            Either a file with reference transcript ids, each id on a new line, or a string
-                            <attribute>:<value>. In the second case transcript is chosen as reference if the value of its
-                            <attribute> contains <value>
+                            Either a file with reference transcript ids, each id on a new line, or a string <attribute>:<value>. In the second case transcript
+                            is chosen as reference if the value of its <attribute> contains <value>
       -p path/to/output/, --prefix path/to/output/
                             Prefix for NMDj output files
       -q file.txt, --ipsa_files file.txt
                             File with paths to ipsa files containing counts of RNA-Seq split-reads aligned to junctions
       --threads THREADS     number of threads for parallel processing
       --no_clustering       skip clustering events
-      --use_nnls            Use non-negative least squares for calculation of junction coefficients for PSI calculation
 
 ## Output
 
