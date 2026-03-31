@@ -23,7 +23,7 @@ To run NMDj, you need the following python dependencies:
 
 - python (tested with 3.9.13)
 - pandas (tested with 1.5.3)
-- gtfparse (tested with 2.5.0)
+- pyranges (tested with 0.1.4)
 - numpy (tested with 1.26.4)
 - biopython (tested with 1.79)
 
@@ -67,6 +67,7 @@ The output is
       --threads THREADS     number of threads for parallel processing
       --no_clustering       skip clustering events
       --use_nnls            Use non-negative least squares for calculation of junction coefficients for PSI calculation
+      --disable_cds         Do not use CDS annotation to assign start and stop codons if they are absent from annotation
 
 ## Output
 

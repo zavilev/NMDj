@@ -16,8 +16,20 @@ import io
 import subprocess
 import csv
 from pandasql import sqldf
+import pyranges as pr
 
 #1. read and write gtf
+
+def read_gtf(file):
+    df = pr.read_gtf(file).df
+    c1 = ['Chromosome', 'Source', 'Feature', 'Start', 'End', 'Score', 'Strand', 'Frame']
+    c2 = ['chrn', 'source', 'type', 'start', 'end', 'score', 'strand', 'frame']
+    d = dict(zip(c1,c2))
+    df = df.rename(columns=d)
+    #fucking pyranges converts gtf coordinates into 0-based half-open system 
+    #(2 hours of my life wasted to find this bug)
+    df.start+=1
+    return df
 
 def desc2dict(desc):
     desc = desc.split("; ")
@@ -216,10 +228,94 @@ def orfann(novel,startann,genome):
 
 #3 convert annotation to more convenient format
 
-def process_annotation(an):  
-    all_transcripts = an[an.type.isin(['transcript','exon',
-                                       'start_codon','stop_codon'])].groupby('type',observed=True,sort=False).transcript_id.agg(set)
+#the function is for converting CDS annotations to start_codon and stop_codon, which are used downstream by NMDj
+#This is needed e.g for CHESS annotation, as it lacks start_codon and stop_codon
+def cds2startstop_old(chess):
+    aa = chess[(chess.type=='CDS')]
+    starts = aa.groupby(['transcript_id','strand']).agg({'start':min,'end':max}).reset_index()
+    
+    starts.loc[starts.strand=='+','sstart'] = starts.loc[starts.strand=='+','start']
+    starts.loc[starts.strand=='+','send'] = starts.loc[starts.strand=='+','sstart']+2
+    
+    starts.loc[starts.strand=='-','send'] = starts.loc[starts.strand=='-','end']
+    starts.loc[starts.strand=='-','sstart'] = starts.loc[starts.strand=='-','send']-2
+    
+    
+    starts.loc[starts.strand=='+','estart'] = starts.loc[starts.strand=='+','end']+1
+    starts.loc[starts.strand=='+','eend'] = starts.loc[starts.strand=='+','estart']+2
+    
+    starts.loc[starts.strand=='-','eend'] = starts.loc[starts.strand=='-','start']-1
+    starts.loc[starts.strand=='-','estart'] = starts.loc[starts.strand=='-','eend']-2
+    
+    start = starts[['transcript_id','sstart','send']].rename(columns={'sstart':'start','send':'end'})
+    stop = starts[['transcript_id','estart','eend']].rename(columns={'estart':'start','eend':'end'})
+    start['type'] = 'start_codon'
+    stop['type'] = 'stop_codon'
+    starts = pd.concat([start,stop])[['transcript_id','start','end','type']]
+    starts[['start','end']] = starts[['start','end']].astype('int')
+    return chess[['chrn','strand','gene_id','transcript_id']].drop_duplicates().merge(starts)
+
+def cds2startstop(chess):
+    aa = chess[(chess.type=='CDS')].sort_values(['chrn','start','end'])
+    first = lambda x: x.iloc[0]
+    last = lambda x: x.iloc[-1]
+    starts = aa.groupby(['transcript_id','strand'], 
+                        sort=False,observed=True).agg({'start':min,'end':max, 
+                                                       'frame':[first,last]}).reset_index()
+    starts.columns = ['transcript_id','strand','start','end','start_frame','end_frame']
+
+    #this needed to adjust start position according to frame for cds_start_NF
+    starts['add_frame'] = np.where(starts.strand=='+',starts.start_frame,starts.end_frame)
+    # here we assume that frame = '.' is 0
+    starts['add_frame'] = pd.to_numeric(starts['add_frame'],
+                                           errors='coerce').fillna(0).astype(int)
+    starts = starts.drop(['start_frame','end_frame'],axis=1)
+
+    
+    starts.loc[starts.strand=='+','sstart'] = starts.loc[starts.strand=='+','start']
+    starts.loc[starts.strand=='+','send'] = starts.loc[starts.strand=='+','sstart']+2
+    
+    starts.loc[starts.strand=='-','send'] = starts.loc[starts.strand=='-','end']
+    starts.loc[starts.strand=='-','sstart'] = starts.loc[starts.strand=='-','send']-2
+    
+    
+    starts.loc[starts.strand=='+','estart'] = starts.loc[starts.strand=='+','end']+1
+    starts.loc[starts.strand=='+','eend'] = starts.loc[starts.strand=='+','estart']+2
+    
+    starts.loc[starts.strand=='-','eend'] = starts.loc[starts.strand=='-','start']-1
+    starts.loc[starts.strand=='-','estart'] = starts.loc[starts.strand=='-','eend']-2
+    
+    start = starts[['transcript_id','sstart',
+                    'send','strand','add_frame']].rename(columns={'sstart':'start','send':'end'})
+    
+    #this needed to adjust start position according to frame for cds_start_NF
+    cond, cols = (start.strand=='+'), ['start','end']
+    start.loc[cond,cols] =  start.loc[cond,cols].add(start.loc[cond,'add_frame'],axis=0)
+    start.loc[~cond,cols] = start.loc[~cond,cols].add(-start.loc[~cond,'add_frame'],axis=0)
+    
+    stop = starts[['transcript_id','estart','eend']].rename(columns={'estart':'start','eend':'end'})
+    start['type'] = 'start_codon'
+    stop['type'] = 'stop_codon'
+    starts = pd.concat([start,stop])[['transcript_id','start','end','type']]
+    starts[['start','end']] = starts[['start','end']].astype('int')
+    return chess[['chrn','strand','gene_id','transcript_id']].drop_duplicates().merge(starts)
+
+def process_annotation(an,disable_cds=False): 
+    if not disable_cds:
+        cds = set(an[an.type=='CDS'].transcript_id)
+        start = set(an[an.type=='start_codon'].transcript_id)
+        stop = set(an[an.type=='stop_codon'].transcript_id)
+        cds_trs = cds-(start&stop)
+        new = cds2startstop(an[an.transcript_id.isin(cds_trs)])
+        an = pd.concat([an,new])
+    
+    types = ['transcript','exon','start_codon','stop_codon']
+    all_transcripts = an[an.type.isin(types)].groupby('type',observed=True,sort=False).transcript_id.agg(set)
     u1 = set.intersection(*all_transcripts)
+    if (set(types)-set(all_transcripts.index)) or (not u1):
+        raise Exception('No fully annotated transcripts.\n\
+        Check if any of <transcript, exon, (start_codon & stop_codon or CDS)> annotations is absent')
+
     an = an[an.transcript_id.isin(u1)]
     
 #    trs = an[(an.type=='transcript')]

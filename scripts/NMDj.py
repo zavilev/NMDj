@@ -31,6 +31,8 @@ if __name__ == '__main__':
                         help='skip clustering events')
     parser.add_argument('--use_nnls', action='store_true',
                         help='Use non-negative least squares for calculation of junction coefficients for PSI calculation')
+    parser.add_argument('--disable_cds', action='store_true',
+                        help='Do not use CDS annotation to assign start and stop codons if they are absent from annotation')
 
 
 
@@ -42,7 +44,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     import pandas as pd
-    from gtfparse import read_gtf
+    #from gtfparse import read_gtf #this crashes on large gtfs, gonna use pyranges
 
     import warnings
     warnings.filterwarnings("ignore")
@@ -68,11 +70,11 @@ if __name__ == '__main__':
     #    gtf = nmdj.load_annotation(args.gtf)
     #    ann = nmdj.load_annotation(args.ann)
         print(args.ann)
-        ann = read_gtf(args.ann,result_type='pandas').rename(columns={'seqname':'chrn','feature':'type'})
+        ann = nmdj.read_gtf(args.ann)
         ann = ann.apply(pd.to_numeric, errors='ignore')
         print('DB transcripts loaded')
         print(args.gtf)
-        gtf = read_gtf(args.gtf,result_type='pandas').rename(columns={'seqname':'chrn','feature':'type'})
+        gtf = nmdj.read_gtf(args.gtf)
         gtf = gtf.apply(pd.to_numeric, errors='ignore')
         print('novel transcripts loaded')
         nset = set(gtf.transcript_id)-set(ann.transcript_id)
@@ -80,7 +82,7 @@ if __name__ == '__main__':
         bigann = pd.concat([gtf,ann])
     else:
     #    gtf = nmdj.load_annotation(args.gtf)
-        gtf = read_gtf(args.gtf,result_type='pandas').rename(columns={'seqname':'chrn','feature':'type'})
+        gtf = nmdj.read_gtf(args.gtf)
         gtf = gtf.apply(pd.to_numeric, errors='ignore')
         bigann = gtf.copy()
     print(f'input GTF loaded, time: {round((time.time()-start_time_all)/60,2)} min',flush=True)
@@ -132,16 +134,16 @@ if __name__ == '__main__':
         orf = orf[orf.transcript_id.isin(nset)]
         if args.nmdann:
             gtf = pd.concat([ann,gtf,orf]).reset_index(drop=True)
-            gtf = nmdj.process_annotation(gtf)
+            gtf = nmdj.process_annotation(gtf,args.disable_cds)
             gtf = nmdj.find_nmd(gtf)
         else:
             novel = pd.concat([gtf,orf]).reset_index(drop=True)
-            novel = nmdj.process_annotation(novel)
+            novel = nmdj.process_annotation(novel,args.disable_cds)
             novel = nmdj.find_nmd(novel)
-            ann = nmdj.process_annotation(ann)
+            ann = nmdj.process_annotation(ann,args.disable_cds)
             gtf = pd.concat([novel,ann])
     else:
-        gtf = nmdj.process_annotation(gtf)
+        gtf = nmdj.process_annotation(gtf,args.disable_cds)
         if args.nmd:
             gtf = nmdj.find_nmd(gtf)
 
