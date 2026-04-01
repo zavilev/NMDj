@@ -45,7 +45,7 @@ if __name__ == '__main__':
 
     import pandas as pd
     #from gtfparse import read_gtf #this crashes on large gtfs, gonna use pyranges
-
+    import os
     import warnings
     warnings.filterwarnings("ignore")
     import subprocess
@@ -95,10 +95,8 @@ if __name__ == '__main__':
     outdir = args.prefix.split('/')
     outdir = '/'.join(outdir[:-1])
     if outdir!='':
-        subprocess.run(f'if not exist "{outdir}" mkdir "{outdir}"', shell=True, check=True)
-        print(f"mkdir -p {outdir}",flush=True)
-
-
+        os.makedirs(outdir, exist_ok=True)
+        
     problems = []
 
 
